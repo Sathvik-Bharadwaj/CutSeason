@@ -6,7 +6,7 @@ import {
   GoogleAuthProvider,
   type Auth,
 } from "firebase/auth";
-import { getFirestore, type Firestore } from "firebase/firestore";
+import { getFirestore, initializeFirestore, type Firestore } from "firebase/firestore";
 
 let firebaseApp: FirebaseApp | null = null;
 let firebaseAuth: Auth | null = null;
@@ -60,7 +60,19 @@ export function getFirestoreDb(): Firestore {
     return firestoreDb;
   }
 
-  firestoreDb = getFirestore(getFirebaseApp());
+  const app = getFirebaseApp();
+
+  try {
+    firestoreDb = initializeFirestore(app, {
+      // Helps in browsers/networks where streaming transport gets blocked.
+      experimentalAutoDetectLongPolling: true,
+      ignoreUndefinedProperties: true,
+    });
+  } catch {
+    // If Firestore was initialized elsewhere already, reuse that instance.
+    firestoreDb = getFirestore(app);
+  }
+
   return firestoreDb;
 }
 
