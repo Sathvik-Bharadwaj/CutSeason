@@ -64,8 +64,8 @@ export function getFirestoreDb(): Firestore {
 
   try {
     firestoreDb = initializeFirestore(app, {
-      // Helps in browsers/networks where streaming transport gets blocked.
-      experimentalAutoDetectLongPolling: true,
+      // More reliable in restrictive browsers/networks (e.g. aggressive shields/proxies).
+      experimentalForceLongPolling: true,
       ignoreUndefinedProperties: true,
     });
   } catch {

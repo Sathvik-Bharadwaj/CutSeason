@@ -12,6 +12,24 @@ import {
 import { useRequireAuth } from "@/lib/useRequireAuth";
 import { type PRRecord, type WeightLogRecord, type WeeklyWeightSummary } from "@/lib/types";
 
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, timeoutMessage: string): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timeoutId = setTimeout(() => {
+      reject(new Error(timeoutMessage));
+    }, timeoutMs);
+
+    promise
+      .then((value) => {
+        clearTimeout(timeoutId);
+        resolve(value);
+      })
+      .catch((error) => {
+        clearTimeout(timeoutId);
+        reject(error);
+      });
+  });
+}
+
 function formatDate(date: Date | null) {
   if (!date) {
     return "-";
@@ -170,8 +188,16 @@ export default function ProgressPage() {
       setWeightError(null);
       setWeightSuccess(null);
 
-      await upsertDailyWeight(user.uid, numericWeight);
-      const updatedLogs = await getWeightLogs(user.uid);
+      await withTimeout(
+        upsertDailyWeight(user.uid, numericWeight),
+        15000,
+        "Save timed out. Disable browser shields/ad blockers for this site and try again.",
+      );
+      const updatedLogs = await withTimeout(
+        getWeightLogs(user.uid),
+        15000,
+        "Refresh timed out. Please retry after disabling browser shields/ad blockers.",
+      );
       setWeightLogs(updatedLogs);
       setWeightSuccess("Daily weight saved.");
     } catch (error) {

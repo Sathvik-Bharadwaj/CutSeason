@@ -13,6 +13,24 @@ import { type LoggedSet, type WorkoutSessionSummary, type WorkoutType } from "@/
 
 type WorkoutStep = "type" | "exercises" | "logging" | "saved";
 
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, timeoutMessage: string): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timeoutId = setTimeout(() => {
+      reject(new Error(timeoutMessage));
+    }, timeoutMs);
+
+    promise
+      .then((value) => {
+        clearTimeout(timeoutId);
+        resolve(value);
+      })
+      .catch((error) => {
+        clearTimeout(timeoutId);
+        reject(error);
+      });
+  });
+}
+
 function typeLabel(type: WorkoutType) {
   return type.charAt(0).toUpperCase() + type.slice(1);
 }
@@ -138,11 +156,15 @@ export default function WorkoutPage() {
     try {
       setIsSaving(true);
       setSaveError(null);
-      const result = await saveWorkoutSession({
-        userId: user.uid,
-        type: selectedType,
-        logs,
-      });
+      const result = await withTimeout(
+        saveWorkoutSession({
+          userId: user.uid,
+          type: selectedType,
+          logs,
+        }),
+        15000,
+        "Save timed out. Disable browser shields/ad blockers for this site and try again.",
+      );
       setSaveResult(result);
       setStep("saved");
     } catch (error) {
