@@ -1,0 +1,60 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isUser(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function incomingOwnedByAuth() {
+      return isSignedIn() && request.resource.data.user_id == request.auth.uid;
+    }
+
+    function existingOwnedByAuth() {
+      return isSignedIn() && resource.data.user_id == request.auth.uid;
+    }
+
+    match /users/{userId} {
+      allow create: if isUser(userId) && request.resource.data.id == request.auth.uid;
+      allow read, update, delete: if isUser(userId);
+    }
+
+    match /sessions/{sessionId} {
+      allow create: if incomingOwnedByAuth();
+      allow read: if existingOwnedByAuth();
+      allow update: if existingOwnedByAuth() && incomingOwnedByAuth();
+      allow delete: if existingOwnedByAuth();
+    }
+
+    match /exercise_logs/{exerciseLogId} {
+      allow create: if incomingOwnedByAuth();
+      allow read: if existingOwnedByAuth();
+      allow update: if existingOwnedByAuth() && incomingOwnedByAuth();
+      allow delete: if existingOwnedByAuth();
+    }
+
+    match /sets/{setId} {
+      allow create: if incomingOwnedByAuth();
+      allow read: if existingOwnedByAuth();
+      allow update: if existingOwnedByAuth() && incomingOwnedByAuth();
+      allow delete: if existingOwnedByAuth();
+    }
+
+    match /prs/{prId} {
+      allow create: if incomingOwnedByAuth();
+      allow read: if existingOwnedByAuth();
+      allow update: if existingOwnedByAuth() && incomingOwnedByAuth();
+      allow delete: if existingOwnedByAuth();
+    }
+
+    match /weight_logs/{weightLogId} {
+      allow create: if incomingOwnedByAuth();
+      allow read: if existingOwnedByAuth();
+      allow update: if existingOwnedByAuth() && incomingOwnedByAuth();
+      allow delete: if existingOwnedByAuth();
+    }
+  }
+}
