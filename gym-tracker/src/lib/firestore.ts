@@ -3,6 +3,7 @@ import {
   Timestamp,
   collection,
   doc,
+  getDoc,
   getDocs,
   limit,
   query,
@@ -51,6 +52,36 @@ function formatDateKey(date: Date): string {
   const month = String(date.getMonth() + 1).padStart(2, "0");
   const day = String(date.getDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
+}
+
+function toPrDocId(userId: string, exerciseName: string): string {
+  const normalized = exerciseName
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/(^-|-$)/g, "");
+  return `${userId}__${normalized}`.slice(0, 150);
+}
+
+function withFirestoreTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  operationName: string,
+): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timeoutId = setTimeout(() => {
+      reject(new Error(`Timeout while ${operationName}. Check browser shields/network and retry.`));
+    }, timeoutMs);
+
+    promise
+      .then((value) => {
+        clearTimeout(timeoutId);
+        resolve(value);
+      })
+      .catch((error) => {
+        clearTimeout(timeoutId);
+        reject(error);
+      });
+  });
 }
 
 export async function getUserPRs(userId: string): Promise<PRRecord[]> {
@@ -177,41 +208,41 @@ export async function getWeightLogs(userId: string): Promise<WeightLogRecord[]> 
 async function upsertExercisePR(userId: string, exerciseName: string, volume: number): Promise<boolean> {
   const db = getFirestoreDb();
   const now = Timestamp.now();
-  const prQuery = query(
-    collection(db, "prs"),
-    where("user_id", "==", userId),
-    where("exercise_name", "==", exerciseName),
-    limit(1),
-  );
+  const prRef = doc(db, "prs", toPrDocId(userId, exerciseName));
+  const snapshot = await withFirestoreTimeout(getDoc(prRef), 12000, `reading PR for ${exerciseName}`);
 
-  const snapshot = await getDocs(prQuery);
-
-  if (snapshot.empty) {
-    const prRef = doc(collection(db, "prs"));
-    await setDoc(prRef, {
-      id: prRef.id,
-      user_id: userId,
-      exercise_name: exerciseName,
-      best_volume: volume,
-      updated_at: now,
-    });
+  if (!snapshot.exists()) {
+    await withFirestoreTimeout(
+      setDoc(prRef, {
+        id: prRef.id,
+        user_id: userId,
+        exercise_name: exerciseName,
+        best_volume: volume,
+        updated_at: now,
+      }),
+      12000,
+      `creating PR for ${exerciseName}`,
+    );
     return true;
   }
 
-  const prDoc = snapshot.docs[0];
-  const current = Number(prDoc.data().best_volume ?? 0);
+  const current = Number(snapshot.data().best_volume ?? 0);
 
   if (volume <= current) {
     return false;
   }
 
-  await setDoc(
-    prDoc.ref,
-    {
-      best_volume: volume,
-      updated_at: now,
-    },
-    { merge: true },
+  await withFirestoreTimeout(
+    setDoc(
+      prRef,
+      {
+        best_volume: volume,
+        updated_at: now,
+      },
+      { merge: true },
+    ),
+    12000,
+    `updating PR for ${exerciseName}`,
   );
 
   return true;
@@ -222,12 +253,16 @@ export async function saveWorkoutSession(input: SaveWorkoutInput): Promise<Worko
   const now = Timestamp.now();
 
   const sessionRef = doc(collection(db, "sessions"));
-  await setDoc(sessionRef, {
-    id: sessionRef.id,
-    user_id: input.userId,
-    type: input.type,
-    date: now,
-  });
+  await withFirestoreTimeout(
+    setDoc(sessionRef, {
+      id: sessionRef.id,
+      user_id: input.userId,
+      type: input.type,
+      date: now,
+    }),
+    12000,
+    "creating workout session",
+  );
 
   const newPrs = new Map<string, number>();
 
@@ -238,13 +273,17 @@ export async function saveWorkoutSession(input: SaveWorkoutInput): Promise<Worko
     }
 
     const exerciseLogRef = doc(collection(db, "exercise_logs"));
-    await setDoc(exerciseLogRef, {
-      id: exerciseLogRef.id,
-      session_id: sessionRef.id,
-      user_id: input.userId,
-      exercise_name: log.exerciseName,
-      performed_at: now,
-    });
+    await withFirestoreTimeout(
+      setDoc(exerciseLogRef, {
+        id: exerciseLogRef.id,
+        session_id: sessionRef.id,
+        user_id: input.userId,
+        exercise_name: log.exerciseName,
+        performed_at: now,
+      }),
+      12000,
+      `creating exercise log for ${log.exerciseName}`,
+    );
 
     let bestVolumeForExercise = 0;
 
@@ -253,17 +292,21 @@ export async function saveWorkoutSession(input: SaveWorkoutInput): Promise<Worko
       bestVolumeForExercise = Math.max(bestVolumeForExercise, volume);
 
       const setRef = doc(collection(db, "sets"));
-      await setDoc(setRef, {
-        id: setRef.id,
-        exercise_log_id: exerciseLogRef.id,
-        session_id: sessionRef.id,
-        user_id: input.userId,
-        set_number: set.setNumber,
-        reps: set.reps,
-        weight: set.weight,
-        volume,
-        created_at: now,
-      });
+      await withFirestoreTimeout(
+        setDoc(setRef, {
+          id: setRef.id,
+          exercise_log_id: exerciseLogRef.id,
+          session_id: sessionRef.id,
+          user_id: input.userId,
+          set_number: set.setNumber,
+          reps: set.reps,
+          weight: set.weight,
+          volume,
+          created_at: now,
+        }),
+        12000,
+        `saving set ${set.setNumber} for ${log.exerciseName}`,
+      );
     }
 
     const isNewPr = await upsertExercisePR(input.userId, log.exerciseName, bestVolumeForExercise);
